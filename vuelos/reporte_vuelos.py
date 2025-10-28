@@ -68,8 +68,11 @@ def buscar_vuelos(pais_origen, fecha_salida):
         vuelo["fecha"] = fecha_salida.strftime("%Y-%m-%d")
         vuelo["precio_thb"] = vuelo["precio_usd"] * 36
         vuelo["pais"] = pais_origen
-        # 🔗 Enlace simulado a Google Flights
-        vuelo["link"] = f"[✈️ Ver vuelo](https://www.google.com/flights?hl=es#flt={origen.split()[0]}.BKK.{fecha_salida.strftime('%Y-%m-%d')})"
+
+        # ✈️ Enlace funcional a Google Flights (compatible globalmente)
+        fecha_str = fecha_salida.strftime("%Y-%m-%d")
+        origen_code = origen.split()[0]  # EZE, ASU o MVD
+        vuelo["link"] = f"[✈️ Ver vuelo](https://www.google.com/travel/flights?q={origen_code}+to+BKK+on+{fecha_str})"
 
     return vuelos_simulados
 
