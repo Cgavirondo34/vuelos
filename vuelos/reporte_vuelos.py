@@ -1,139 +1,140 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import random
+import requests
+import os
 
 # ===============================
-# FUNCIÓN PARA SIMULAR VUELOS
+# CONFIGURACIÓN DE CREDENCIALES
 # ===============================
-def buscar_vuelos(pais_origen, fecha_salida):
-    aeropuertos = {
-        "Argentina": "EZE (Buenos Aires)",
-        "Paraguay": "ASU (Asunción)",
-        "Uruguay": "MVD (Montevideo)"
+# ⚠️ Reemplazá con tus credenciales reales de Amadeus (modo test)
+CLIENT_ID = "sbKAsw4mqHHqT5AocOyjcScHldW0xCx1"
+CLIENT_SECRET = "5htTldQeWUr48sr4"  # ← poné tu secret real acá
+
+# ===============================
+# FUNCIÓN: OBTENER TOKEN
+# ===============================
+def get_amadeus_token():
+    url = "https://test.api.amadeus.com/v1/security/oauth2/token"
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET
     }
-    origen = aeropuertos.get(pais_origen, "Desconocido")
-
-    # Lista ampliada de aerolíneas (latinoamericanas, europeas, asiáticas y globales)
-    aerolineas = [
-        ("Aerolíneas Argentinas", 850, 1200),
-        ("LATAM Airlines", 800, 1150),
-        ("Gol Linhas Aéreas", 750, 1050),
-        ("Copa Airlines", 900, 1250),
-        ("Avianca", 850, 1200),
-        ("Sky Airline", 780, 1100),
-        ("Azul Brazilian Airlines", 780, 1150),
-        ("American Airlines", 950, 1350),
-        ("Delta Airlines", 980, 1400),
-        ("United Airlines", 980, 1450),
-        ("Air France", 1100, 1500),
-        ("KLM Royal Dutch", 1050, 1450),
-        ("Lufthansa", 1050, 1500),
-        ("British Airways", 1100, 1550),
-        ("Iberia", 1000, 1400),
-        ("Swiss International", 1050, 1500),
-        ("Turkish Airlines", 900, 1300),
-        ("Qatar Airways", 950, 1350),
-        ("Emirates", 1000, 1450),
-        ("Etihad Airways", 1000, 1450),
-        ("Singapore Airlines", 950, 1300),
-        ("Cathay Pacific", 950, 1350),
-        ("Thai Airways", 900, 1300),
-        ("Japan Airlines", 970, 1400),
-        ("Korean Air", 970, 1400),
-        ("China Airlines", 900, 1300),
-        ("Air China", 880, 1250),
-        ("ANA All Nippon Airways", 950, 1400),
-        ("Qantas Airways", 950, 1350),
-        ("Air Canada", 950, 1400),
-        ("Air Europa", 950, 1350),
-        ("Scandinavian Airlines", 1000, 1450),
-        ("Finnair", 1000, 1450),
-    ]
-
-    # Generar vuelos simulados
-    vuelos_simulados = []
-    for aerolinea, min_precio, max_precio in aerolineas:
-        vuelos_simulados.append({
-            "aerolinea": aerolinea,
-            "precio_usd": random.randint(min_precio, max_precio),
-            "duracion": f"{random.randint(18, 30)}h",
-            "escalas": random.choice([0, 1, 2]),
-        })
-
-    # Agregar detalles comunes
-    for vuelo in vuelos_simulados:
-        vuelo["origen"] = origen
-        vuelo["destino"] = "BKK (Bangkok, Tailandia)"
-        vuelo["fecha"] = fecha_salida.strftime("%Y-%m-%d")
-        vuelo["precio_thb"] = vuelo["precio_usd"] * 36
-        vuelo["pais"] = pais_origen
-
-        # ✈️ Enlace funcional a Google Flights (compatible globalmente)
-        fecha_str = fecha_salida.strftime("%Y-%m-%d")
-        origen_code = origen.split()[0]  # EZE, ASU o MVD
-        vuelo["link"] = f"[✈️ Ver vuelo](https://www.google.com/travel/flights?q={origen_code}+to+BKK+on+{fecha_str})"
-
-    return vuelos_simulados
+    resp = requests.post(url, data=data)
+    if resp.status_code == 200:
+        return resp.json()["access_token"]
+    else:
+        st.error("❌ Error al obtener token de Amadeus.")
+        return None
 
 # ===============================
-# FUNCIÓN PARA GENERAR REPORTE DIARIO
+# FUNCIÓN: BUSCAR VUELOS REALES
+# ===============================
+def buscar_vuelos(pais_origen, fecha_salida, token):
+    aeropuertos = {
+        "Argentina": "EZE",  # Buenos Aires
+        "Paraguay": "ASU",   # Asunción
+        "Uruguay": "MVD"     # Montevideo
+    }
+    origen = aeropuertos.get(pais_origen, "EZE")
+
+    url = "https://test.api.amadeus.com/v2/shopping/flight-offers"
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {
+        "originLocationCode": origen,
+        "destinationLocationCode": "BKK",
+        "departureDate": fecha_salida.strftime("%Y-%m-%d"),
+        "adults": 1,
+        "max": 5
+    }
+
+    resp = requests.get(url, headers=headers, params=params)
+    if resp.status_code != 200:
+        return []
+
+    data = resp.json().get("data", [])
+    vuelos = []
+    for v in data:
+        vuelos.append({
+            "aerolinea": v.get("validatingAirlineCodes", ["Desconocida"])[0],
+            "precio_usd": float(v["price"]["total"]),
+            "duracion": v["itineraries"][0]["duration"].replace("PT", "").lower(),
+            "escalas": len(v["itineraries"][0]["segments"]) - 1,
+            "origen": origen,
+            "destino": "BKK",
+            "fecha": fecha_salida.strftime("%Y-%m-%d"),
+            "pais": pais_origen,
+            "link": "https://www.google.com/travel/flights?q=" + origen + "+to+BKK+on+" + fecha_salida.strftime("%Y-%m-%d")
+        })
+    return vuelos
+
+# ===============================
+# FUNCIÓN: GENERAR REPORTE COMPLETO
 # ===============================
 def generar_reporte_comparativo():
-    fecha_inicio = datetime(2026, 9, 1)
-    fecha_fin = datetime(2026, 9, 30)
-    dias = (fecha_fin - fecha_inicio).days + 1
+    token = get_amadeus_token()
+    if not token:
+        return None, None
 
+    fecha_inicio = datetime(2026, 9, 1)
+    fecha_fin = datetime(2026, 9, 5)  # 🔹 límite corto (5 días) para no exceder límite API
+    dias = (fecha_fin - fecha_inicio).days + 1
     paises = ["Argentina", "Paraguay", "Uruguay"]
     vuelos_totales = []
 
     for i in range(dias):
         fecha = fecha_inicio + timedelta(days=i)
         for pais in paises:
-            vuelos_totales.extend(buscar_vuelos(pais, fecha))
-    
+            vuelos_totales.extend(buscar_vuelos(pais, fecha, token))
+
     df = pd.DataFrame(vuelos_totales)
+    if df.empty:
+        st.warning("No se encontraron vuelos reales en el rango consultado.")
+        return None, None
 
     # Mejor precio por país y fecha
     df_mejores = df.loc[df.groupby(["pais", "fecha"])["precio_usd"].idxmin()].reset_index(drop=True)
-    
     return df, df_mejores
 
 # ===============================
 # INTERFAZ STREAMLIT
 # ===============================
-st.set_page_config(page_title="Reporte de Vuelos", page_icon="✈️", layout="wide")
-st.title("🌏 Reporte comparativo de vuelos a Bangkok – Septiembre 2026")
+st.set_page_config(page_title="Reporte de Vuelos Reales", page_icon="✈️", layout="wide")
+st.title("🌏 Reporte de vuelos reales a Bangkok – Amadeus API")
 
 st.write("""
-Este panel simula precios diarios de vuelos desde **Argentina**, **Paraguay** y **Uruguay** hacia **Bangkok (BKK)** durante septiembre de 2026.  
-Los precios se generan aleatoriamente con más de **30 aerolíneas internacionales** y pueden descargarse en CSV.
+Esta aplicación obtiene precios **reales** de la API de **Amadeus** (modo test)  
+para vuelos desde **Argentina**, **Paraguay** y **Uruguay** hacia **Bangkok (BKK)**.  
+El rango actual es del **1 al 5 de septiembre de 2026** para evitar límites de la API gratuita.
 """)
 
-if st.button("🧾 Generar reporte"):
-    with st.spinner("Simulando vuelos y generando reporte..."):
+if st.button("🧾 Generar reporte real"):
+    with st.spinner("Consultando Amadeus y generando reporte..."):
         df_todos, df_mejores = generar_reporte_comparativo()
 
-    st.subheader("📊 Mejores precios diarios por país")
-    df_links = df_mejores[["fecha", "pais", "aerolinea", "precio_usd", "duracion", "escalas", "link"]]
-    st.markdown(df_links.to_markdown(index=False), unsafe_allow_html=True)
+    if df_todos is not None:
+        st.subheader("📊 Mejores precios diarios por país")
+        df_links = df_mejores[["fecha", "pais", "aerolinea", "precio_usd", "duracion", "escalas", "link"]]
+        st.markdown(df_links.to_markdown(index=False), unsafe_allow_html=True)
 
-    st.subheader("💰 Promedio de precios por país (USD)")
-    promedio = df_todos.groupby("pais")["precio_usd"].mean().reset_index()
-    st.bar_chart(data=promedio, x="pais", y="precio_usd")
+        st.subheader("💰 Promedio de precios por país (USD)")
+        promedio = df_todos.groupby("pais")["precio_usd"].mean().reset_index()
+        st.bar_chart(data=promedio, x="pais", y="precio_usd")
 
-    st.subheader("📈 Evolución diaria de precios mínimos (USD)")
-    minimos_diarios = df_todos.groupby(["fecha", "pais"])["precio_usd"].min().reset_index()
-    pivot = minimos_diarios.pivot(index="fecha", columns="pais", values="precio_usd")
-    st.line_chart(pivot)
+        st.subheader("📈 Evolución diaria de precios mínimos (USD)")
+        minimos_diarios = df_todos.groupby(["fecha", "pais"])["precio_usd"].min().reset_index()
+        pivot = minimos_diarios.pivot(index="fecha", columns="pais", values="precio_usd")
+        st.line_chart(pivot)
 
-    st.subheader("⬇️ Descargar reporte completo (CSV)")
-    csv = df_todos.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="Descargar CSV",
-        data=csv,
-        file_name="reporte_vuelos_septiembre2026.csv",
-        mime="text/csv"
-    )
+        st.subheader("⬇️ Descargar reporte completo (CSV)")
+        csv = df_todos.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Descargar CSV",
+            data=csv,
+            file_name="reporte_vuelos_reales.csv",
+            mime="text/csv"
+        )
 
-    st.success("✅ Reporte generado exitosamente.")
+        st.success("✅ Reporte generado exitosamente con datos reales.")
+
